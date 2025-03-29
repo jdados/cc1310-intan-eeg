@@ -86,10 +86,10 @@ void *masterThread(void *arg0)
 
     printf("Reading INTAN from registers 40-44\n");
     send_spi_command(0b1110100000000000, masterSpi, transaction);
-    send_spi_command(0b111010010000000, masterSpi, transaction);
-    send_spi_command(0b111010100000000, masterSpi, transaction);
-    send_spi_command(0b111010110000000, masterSpi, transaction);
-    send_spi_command(0b111011000000000, masterSpi, transaction);
+    send_spi_command(0b1110100100000000, masterSpi, transaction);
+    send_spi_command(0b1110101000000000, masterSpi, transaction);
+    send_spi_command(0b1110101100000000, masterSpi, transaction);
+    send_spi_command(0b1110110000000000, masterSpi, transaction);
 
     /* Write to Register 0: ADC Configuration and Amplifier Fast Settle */
     /* Nominal settings from datasheet */
@@ -109,7 +109,7 @@ void *masterThread(void *arg0)
 
     /* Write to Register 4: ADC Output Format and DSP Offset Removal */
     /* Drive MISO to 1 when idle, use unsigned data instead of 2s complement, don't use absolute value, disable DSP filtering */
-    send_spi_command(0b1000010010000000, masterSpi, transaction);
+    send_spi_command(0b1000010011100000, masterSpi, transaction);
 
     /* Write to Register 5: Impedance Check Control */
     /* No electrode calibration using a DAC waveform generator */
