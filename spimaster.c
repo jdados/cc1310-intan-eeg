@@ -29,9 +29,6 @@ void send_spi_command(uint16_t command, SPI_Handle masterSpi, SPI_Transaction tr
     transaction.txBuf = (void *) masterTxBuffer;
     transaction.rxBuf = (void *) masterRxBuffer;
 
-    /* Toggle user LED, indicating a SPI transfer is in progress */
-    GPIO_toggle(Board_GPIO_LED1);
-
     /* Perform SPI transfer */
     printf("Sending command: %i, ", masterTxBuffer[0]);
     bool transferOK;
@@ -41,19 +38,47 @@ void send_spi_command(uint16_t command, SPI_Handle masterSpi, SPI_Transaction tr
 
     transferOK = SPI_transfer(masterSpi, &transaction);
     if (transferOK) {
-        printf("Master received: %i \n", masterRxBuffer[0]);
+        printf("Received: %i \n", masterRxBuffer[0]);
+        /*Set CSn to high */
+        GPIO_write(IOID_11, 1);
+        usleep(100);
+        return;
     }
     else {
         printf("Unsuccessful master SPI transfer");
         while(1);
     }
 
-    /*Set CSn to high */
-    GPIO_write(IOID_11, 1);
-    usleep(1000);
 }
 
+uint16_t convert_channel(int channel, SPI_Handle masterSpi, SPI_Transaction transaction){
+    /* CONVERT(n) command */
+    masterTxBuffer[0] = 0x0000 | (uint16_t)channel << 8;
 
+    /* Initialize master SPI transaction structure */
+    memset((void *) masterRxBuffer, 0, 1);
+    transaction.count = 1;
+    transaction.txBuf = (void *) masterTxBuffer;
+    transaction.rxBuf = (void *) masterRxBuffer;
+
+    /* Perform SPI transfer */
+    //printf("Sending: %i \n", masterTxBuffer[0]);
+    bool transferOK;
+
+    /*Set CSn to low */
+    GPIO_write(IOID_11, 0);
+
+    transferOK = SPI_transfer(masterSpi, &transaction);
+    if (transferOK) {
+        /*Set CSn to high */
+        GPIO_write(IOID_11, 1);
+        return(masterRxBuffer[0]);
+    }
+    else {
+        printf("Unsuccessful SPI transfer");
+        while(1);
+    }
+}
 
 void *masterThread(void *arg0)
 {
@@ -76,7 +101,7 @@ void *masterThread(void *arg0)
         while (1);
     }
     else {
-        printf("Master SPI initialized\n");
+        printf("SPI initialized\n");
     }
 
     /* Verify the SPI connection by reading registers 40 - 44 */
@@ -155,10 +180,16 @@ void *masterThread(void *arg0)
     send_spi_command(0b1111111100000000, masterSpi, transaction);
 
     /* Chip is now ready, start performing conversions*/
-    printf("Conversion on channel 0 \n");
-    int i = 0;
+    uint16_t adc_result = 0;
     while(1){
-        send_spi_command(0, masterSpi, transaction);
+        adc_result = convert_channel(0,masterSpi, transaction);
+        /*
+        if(result > 10000){
+            printf("Spike detected! \n");
+            break;
+        }
+        */
+        //printf("ADC output: %i \n",result);
     }
 
     printf("Done");
