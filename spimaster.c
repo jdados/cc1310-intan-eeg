@@ -51,7 +51,7 @@ void send_spi_command(uint16_t command, SPI_Handle masterSpi, SPI_Transaction tr
 
 }
 
-uint16_t convert_channel(int channel, SPI_Handle masterSpi, SPI_Transaction transaction){
+int16_t convert_channel(int channel, SPI_Handle masterSpi, SPI_Transaction transaction){
     /* CONVERT(n) command */
     masterTxBuffer[0] = 0x0000 | (uint16_t)channel << 8;
 
@@ -92,7 +92,7 @@ void *masterThread(void *arg0)
     /* Open SPI as master (default) */
     SPI_Params_init(&spiParams);
     spiParams.frameFormat = SPI_POL0_PHA0; //CPOL=0 and CPHA=0 required by RHD2132
-    spiParams.bitRate = 115200;
+    spiParams.bitRate = 4000000;
     spiParams.dataSize = 16;
     spiParams.transferMode = SPI_MODE_BLOCKING;
     masterSpi = SPI_open(Board_SPI_MASTER, &spiParams);
@@ -133,8 +133,8 @@ void *masterThread(void *arg0)
     send_spi_command(0b1000001100000010, masterSpi, transaction);
 
     /* Write to Register 4: ADC Output Format and DSP Offset Removal */
-    /* Drive MISO to 1 when idle, use unsigned data instead of 2s complement, don't use absolute value, disable DSP filtering */
-    send_spi_command(0b1000010011100000, masterSpi, transaction);
+    /* Drive MISO to 1 when idle, use 2s complement, don't use absolute value, disable DSP filtering */
+    send_spi_command(0b1000010011000000, masterSpi, transaction);
 
     /* Write to Register 5: Impedance Check Control */
     /* No electrode calibration using a DAC waveform generator */
@@ -180,7 +180,7 @@ void *masterThread(void *arg0)
     send_spi_command(0b1111111100000000, masterSpi, transaction);
 
     /* Chip is now ready, start performing conversions*/
-    uint16_t adc_result = 0;
+    int16_t adc_result = 0;
     while(1){
         adc_result = convert_channel(0,masterSpi, transaction);
         /*
