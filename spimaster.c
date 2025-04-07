@@ -108,11 +108,11 @@ void *masterThread(void *arg0)
     }
 
     /* Verify the SPI connection by reading registers 40 - 44 */
-    printf("Send two dummy commands to prepare the IC\n");
+    //printf("Send two dummy commands to prepare the IC\n");
     send_spi_command(0b1111111100000000, masterSpi, transaction);
     send_spi_command(0b1111111100000000, masterSpi, transaction);
 
-    printf("Reading INTAN from registers 40-44\n");
+    //printf("Reading INTAN from registers 40-44\n");
     send_spi_command(0b1110100000000000, masterSpi, transaction);
     send_spi_command(0b1110100100000000, masterSpi, transaction);
     send_spi_command(0b1110101000000000, masterSpi, transaction);
@@ -247,7 +247,7 @@ void *mainThread(void *arg0)
     GPIO_write(IOID_11, 1);
     SPI_init();
 
-    printf("Connecting to INTAN\n");
+    printf("Initializing Intan RHD2132 \n");
 
     /* Create application threads */
     pthread_attr_init(&attrs);
