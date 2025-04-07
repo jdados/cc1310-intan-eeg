@@ -19,6 +19,9 @@
 uint16_t masterRxBuffer[1];
 uint16_t masterTxBuffer[1];
 
+#define n_samples 1000
+double voltage_readings[n_samples];
+
 void send_spi_command(uint16_t command, SPI_Handle masterSpi, SPI_Transaction transaction){
     /* Upload command value */
     masterTxBuffer[0] = command;
@@ -30,7 +33,7 @@ void send_spi_command(uint16_t command, SPI_Handle masterSpi, SPI_Transaction tr
     transaction.rxBuf = (void *) masterRxBuffer;
 
     /* Perform SPI transfer */
-    printf("Sending command: %i, ", masterTxBuffer[0]);
+    //printf("Sending command: %i, ", masterTxBuffer[0]);
     bool transferOK;
 
     /*Set CSn to low */
@@ -38,7 +41,7 @@ void send_spi_command(uint16_t command, SPI_Handle masterSpi, SPI_Transaction tr
 
     transferOK = SPI_transfer(masterSpi, &transaction);
     if (transferOK) {
-        printf("Received: %i \n", masterRxBuffer[0]);
+        //printf("Received: %i \n", masterRxBuffer[0]);
         /*Set CSn to high */
         GPIO_write(IOID_11, 1);
         usleep(100);
@@ -122,11 +125,11 @@ void *masterThread(void *arg0)
 
     /* Write to Register 1:  Supply Sensor and ADC Buffer Bias Current */
     /* ADC buffer bias  =  32 because we're using the lowest sampling rate*/
-    send_spi_command(0b1000000101100000, masterSpi, transaction);
+    send_spi_command(0b1000000100100000, masterSpi, transaction);
 
     /* Write to Register 2: MUX Bias Current */
     /* Nominal settings from datasheet */
-    send_spi_command(0b1000001000000010, masterSpi, transaction);
+    send_spi_command(0b1000001000101000, masterSpi, transaction);
 
     /* Write to Register 3: MUX Load, Temperature Sensor, and Auxiliary Digital Output */
     /* Disable temperature sensor and digital output*/
@@ -134,7 +137,7 @@ void *masterThread(void *arg0)
 
     /* Write to Register 4: ADC Output Format and DSP Offset Removal */
     /* Drive MISO to 1 when idle, use 2s complement, don't use absolute value, disable DSP filtering */
-    send_spi_command(0b1000010011000000, masterSpi, transaction);
+    send_spi_command(0b1000010011010000, masterSpi, transaction);
 
     /* Write to Register 5: Impedance Check Control */
     /* No electrode calibration using a DAC waveform generator */
@@ -149,13 +152,13 @@ void *masterThread(void *arg0)
     send_spi_command(0b1000011100000000, masterSpi, transaction);
 
     /* Write to Registers 8-13: On-Chip Amplifier Bandwidth Select */
-    /* Upper bandwidth = 100 Hz, lower bandwidth = 0.1 Hz */
-    send_spi_command(0b1000100000100110, masterSpi, transaction);
-    send_spi_command(0b1000100100011010, masterSpi, transaction);
-    send_spi_command(0b1000101000000101, masterSpi, transaction);
-    send_spi_command(0b1000101100011111, masterSpi, transaction);
-    send_spi_command(0b1000110000010000, masterSpi, transaction);
-    send_spi_command(0b1000110101111100, masterSpi, transaction);
+    /* Upper bandwidth = 2000 Hz, lower bandwidth = 1 Hz */
+    send_spi_command(0b1000100000011011, masterSpi, transaction);
+    send_spi_command(0b1000100100000001, masterSpi, transaction);
+    send_spi_command(0b1000101000101100, masterSpi, transaction);
+    send_spi_command(0b1000101100000001, masterSpi, transaction);
+    send_spi_command(0b1000110000101100, masterSpi, transaction);
+    send_spi_command(0b1000110100000110, masterSpi, transaction);
 
     /* Write to Registers 14-17: : Individual Amplifier Power */
     /* Power down amplifiers 8-31 */
@@ -165,7 +168,6 @@ void *masterThread(void *arg0)
     send_spi_command(0b1001000100000000, masterSpi, transaction);
 
     /* Calibrate */
-    printf("Calibration \n");
     send_spi_command(0b0101010100000000, masterSpi, transaction);
 
     /* Nine dummy commands after calibration*/
@@ -178,22 +180,57 @@ void *masterThread(void *arg0)
     send_spi_command(0b1111111100000000, masterSpi, transaction);
     send_spi_command(0b1111111100000000, masterSpi, transaction);
     send_spi_command(0b1111111100000000, masterSpi, transaction);
+    
+    /* Wait 5s for the chip to stabilize*/
+    sleep(5);
 
-    /* Chip is now ready, start performing conversions*/
-    int16_t adc_result = 0;
-    while(1){
-        adc_result = convert_channel(0,masterSpi, transaction);
-        /*
-        if(result > 10000){
-            printf("Spike detected! \n");
-            break;
-        }
-        */
-        //printf("ADC output: %i \n",result);
+    /*Start sampling*/
+    int f_sample = 30000;
+    int delay = (int)1000000*(1/(float)f_sample);
+
+    int i = 0;
+    float v;
+    for(i = 0; i < n_samples/2; i++){
+        v = 0.195*convert_channel(0, masterSpi, transaction); 
+        usleep(delay);
     }
+    while(1){
+        double min = voltage_readings[0]; 
+        double max = voltage_readings[0];  
+        double sum = 0.0;  
+        double avg = 0.0;  
 
-    printf("Done");
+        for(i = 0; i < n_samples; i++){
+            voltage_readings[i] = 0.195*convert_channel(0, masterSpi, transaction); 
+            usleep(delay);
+        }
+
+        for (i = 0; i < n_samples; i++) {
+        if (voltage_readings[i] < min) {
+            min = voltage_readings[i];  // Update min if current value is smaller
+        }
+        if (voltage_readings[i] > max) {
+            max = voltage_readings[i];  // Update max if current value is larger
+        }
+        sum += voltage_readings[i];  // Add current value to sum
+        }
+        
+        avg = sum / n_samples;
+
+        char buffer[50];
+        sprintf(buffer, "Min value: %.2f uV \n", min);
+        printf("%s", buffer);
+        sprintf(buffer, "Avg value: %.2f uV \n", avg);
+        printf("%s", buffer);
+        sprintf(buffer, "Max value: %.2f uV \n", max);
+        printf("%s", buffer);
+        printf("\n");
+    }
+    
+    
     SPI_close(masterSpi);
+    printf("Data acquisition complete \n");
+
     return (NULL);
 }
 
