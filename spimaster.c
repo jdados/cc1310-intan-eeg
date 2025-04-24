@@ -125,11 +125,11 @@ void *masterThread(void *arg0)
 
     /* Write to Register 1:  Supply Sensor and ADC Buffer Bias Current */
     /* ADC buffer bias  =  32 because we're using the lowest sampling rate*/
-    send_spi_command(0b1000000100100000, masterSpi, transaction);
+    send_spi_command(0b1000000100000010, masterSpi, transaction);
 
     /* Write to Register 2: MUX Bias Current */
     /* Nominal settings from datasheet */
-    send_spi_command(0b1000001000101000, masterSpi, transaction);
+    send_spi_command(0b1000001000000100, masterSpi, transaction);
 
     /* Write to Register 3: MUX Load, Temperature Sensor, and Auxiliary Digital Output */
     /* Disable temperature sensor and digital output*/
@@ -137,7 +137,7 @@ void *masterThread(void *arg0)
 
     /* Write to Register 4: ADC Output Format and DSP Offset Removal */
     /* Drive MISO to 1 when idle, use 2s complement, don't use absolute value, disable DSP filtering */
-    send_spi_command(0b1000010011010000, masterSpi, transaction);
+    send_spi_command(0b100001001110000, masterSpi, transaction);
 
     /* Write to Register 5: Impedance Check Control */
     /* No electrode calibration using a DAC waveform generator */
@@ -152,13 +152,13 @@ void *masterThread(void *arg0)
     send_spi_command(0b1000011100000000, masterSpi, transaction);
 
     /* Write to Registers 8-13: On-Chip Amplifier Bandwidth Select */
-    /* Upper bandwidth = 2000 Hz, lower bandwidth = 1 Hz */
-    send_spi_command(0b1000100000011011, masterSpi, transaction);
-    send_spi_command(0b1000100100000001, masterSpi, transaction);
-    send_spi_command(0b1000101000101100, masterSpi, transaction);
-    send_spi_command(0b1000101100000001, masterSpi, transaction);
-    send_spi_command(0b1000110000101100, masterSpi, transaction);
-    send_spi_command(0b1000110100000110, masterSpi, transaction);
+    /* Upper bandwidth = 300 Hz, lower bandwidth = 1 Hz */
+    send_spi_command(0b1000100000000110, masterSpi, transaction);
+    send_spi_command(0b1000100100001001, masterSpi, transaction);
+    send_spi_command(0b1000101000000010, masterSpi, transaction);
+    send_spi_command(0b1000101100001011, masterSpi, transaction);
+    send_spi_command(0b1000110000111110, masterSpi, transaction);
+    send_spi_command(0b1000110100000000, masterSpi, transaction);
 
     /* Write to Registers 14-17: : Individual Amplifier Power */
     /* Power down amplifiers 8-31 */
@@ -180,41 +180,38 @@ void *masterThread(void *arg0)
     send_spi_command(0b1111111100000000, masterSpi, transaction);
     send_spi_command(0b1111111100000000, masterSpi, transaction);
     send_spi_command(0b1111111100000000, masterSpi, transaction);
-    
+
     /* Wait 5s for the chip to stabilize*/
     sleep(5);
 
     /*Start sampling*/
-    int f_sample = 30000;
+    int f_sample = 300000;
     int delay = (int)1000000*(1/(float)f_sample);
 
     int i = 0;
-    float v;
-    for(i = 0; i < n_samples/2; i++){
-        v = 0.195*convert_channel(0, masterSpi, transaction); 
-        usleep(delay);
-    }
     while(1){
-        double min = voltage_readings[0]; 
-        double max = voltage_readings[0];  
-        double sum = 0.0;  
-        double avg = 0.0;  
-
+        double min = voltage_readings[0];
+        double max = voltage_readings[0];
+        double sum = 0.0;
+        double avg = 0.0;
+        double v = 0;
         for(i = 0; i < n_samples; i++){
-            voltage_readings[i] = 0.195*convert_channel(0, masterSpi, transaction); 
+            //voltage_readings[i] = 0.195*convert_channel(0, masterSpi, transaction);
+            v = 0.195*convert_channel(0, masterSpi, transaction);
             usleep(delay);
         }
-
+        /*
         for (i = 0; i < n_samples; i++) {
-        if (voltage_readings[i] < min) {
-            min = voltage_readings[i];  // Update min if current value is smaller
+            if (voltage_readings[i] < min) {
+                min = voltage_readings[i];  // Update min if current value is smaller
+            }
+            if (voltage_readings[i] > max) {
+                max = voltage_readings[i];  // Update max if current value is larger
+            }
+            sum += voltage_readings[i];  // Add current value to sum
         }
-        if (voltage_readings[i] > max) {
-            max = voltage_readings[i];  // Update max if current value is larger
-        }
-        sum += voltage_readings[i];  // Add current value to sum
-        }
-        
+
+
         avg = sum / n_samples;
 
         char buffer[50];
@@ -225,9 +222,10 @@ void *masterThread(void *arg0)
         sprintf(buffer, "Max value: %.2f uV \n", max);
         printf("%s", buffer);
         printf("\n");
+        */
     }
-    
-    
+
+
     SPI_close(masterSpi);
     printf("Data acquisition complete \n");
 
