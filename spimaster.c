@@ -1,26 +1,54 @@
+include <stdlib.h>
+#include <unistd.h>
+#include <ti/drivers/rf/RF.h>
+#include <ti/drivers/PIN.h>
+#include <ti/drivers/pin/PINCC26XX.h>
+#include <ti/drivers/GPIO.h>
+#include DeviceFamily_constructPath(driverlib/rf_prop_mailbox.h)
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
-/* POSIX Header files */
-#include <pthread.h>
-#include <semaphore.h>
-#include <unistd.h>
-
-/* Driver Header files */
-#include <ti/drivers/GPIO.h>
 #include <ti/drivers/SPI.h>
 
-/* Example/Board Header files */
+#include <pthread.h>
+#include <semaphore.h>
+
 #include "Board.h"
+#include "smartrf_settings/smartrf_settings.h"
 
 #define THREADSTACKSIZE (1024)
+
+/* Set packet interval to 1s */
+#define PAYLOAD_LENGTH      2
+#define PACKET_INTERVAL     9995000  
+static RF_Object rfObject;
+static RF_Handle rfHandle;
+static uint8_t packet[PAYLOAD_LENGTH];
 
 uint16_t masterRxBuffer[1];
 uint16_t masterTxBuffer[1];
 
 #define n_samples 1000
 double voltage_readings[n_samples];
+
+static PIN_Handle ledPinHandle;
+
+/* Global memory storage for a PIN_Config table */
+static PIN_State ledPinState;
+
+/*
+ * Initial LED pin configuration table
+ *   - LEDs Board_PIN_LED0 is on.
+ *   - LEDs Board_PIN_LED1 is off.
+ */
+PIN_Config ledPinTable[] = {
+    Board_PIN_LED0 | PIN_GPIO_OUTPUT_EN | PIN_GPIO_HIGH | PIN_PUSHPULL | PIN_DRVSTR_MAX,
+    Board_PIN_LED1 | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW  | PIN_PUSHPULL | PIN_DRVSTR_MAX,
+    Board_PIN_PA | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW  | PIN_PUSHPULL | PIN_DRVSTR_MAX,
+    PIN_TERMINATE
+};
+
 
 void send_spi_command(uint16_t command, SPI_Handle masterSpi, SPI_Transaction transaction){
     /* Upload command value */
@@ -83,14 +111,81 @@ int16_t convert_channel(int channel, SPI_Handle masterSpi, SPI_Transaction trans
     }
 }
 
+void rfStimulation(int n_pulses){
+    int k;
+    for(k = 0; k < n_pulses; k++ ){
+        /* Fill the packet with 1s to obtain an uninterrupted RF pulse */
+        uint8_t i;
+        for (i = 0; i < PAYLOAD_LENGTH; i++){
+            packet[i] = 0xFF;
+        }
+
+        /* Activate the CMX901 PA */
+        PIN_setOutputValue(ledPinHandle, Board_PIN_PA, 1);
+
+        /* Send packet */
+        RF_EventMask terminationReason = RF_runCmd(rfHandle, (RF_Op*)&RF_cmdPropTx, RF_PriorityNormal, NULL, 0);
+        switch(terminationReason){
+            case RF_EventLastCmdDone:
+                // A stand-alone radio operation command or the last radio operation command in a chain finished.
+                break;
+            case RF_EventCmdCancelled:
+                // Command cancelled before it was started; it can be caused by RF_cancelCmd() or RF_flushCmd().
+                break;
+            case RF_EventCmdAborted:
+                // Abrupt command termination caused by RF_cancelCmd() or RF_flushCmd().
+                break;
+            case RF_EventCmdStopped:
+                // Graceful command termination caused by RF_cancelCmd() or RF_flushCmd().
+                break;
+            default:
+                // Uncaught error event
+                while(1);
+        }
+        /* Deactivate the CMX901 PA */
+        PIN_setOutputValue(ledPinHandle, Board_PIN_PA, 0);
+
+        uint32_t cmdStatus = ((volatile RF_Op*)&RF_cmdPropTx)->status;
+        switch(cmdStatus){
+            case PROP_DONE_OK:
+                // Packet transmitted successfully
+                break;
+            case PROP_DONE_STOPPED:
+                // received CMD_STOP while transmitting packet and finished transmitting packet
+                break;
+            case PROP_DONE_ABORT:
+                // Received CMD_ABORT while transmitting packet
+                break;
+            case PROP_ERROR_PAR:
+                // Observed illegal parameter
+                break;
+            case PROP_ERROR_NO_SETUP:
+                // Command sent without setting up the radio in a supported mode using CMD_PROP_RADIO_SETUP or CMD_RADIO_SETUP
+                break;
+            case PROP_ERROR_NO_FS:
+                // Command sent without the synthesizer being programmed
+                break;
+            case PROP_ERROR_TXUNF:
+                // TX underflow observed during operation
+                break;
+            default:
+                // Uncaught error event - these could come from the pool of states defined in rf_mailbox.h
+                while(1);
+        }
+
+        /* Power down the radio */
+        RF_yield(rfHandle);
+
+        /* Sleep for PACKET_INTERVAL us */
+        usleep(PACKET_INTERVAL);
+    }
+}
+
 void *masterThread(void *arg0)
 {
     SPI_Handle      masterSpi;
     SPI_Params      spiParams;
     SPI_Transaction transaction;
-
-    /*Set CSn to high */
-    GPIO_write(IOID_11, 1);
 
     /* Open SPI as master (default) */
     SPI_Params_init(&spiParams);
@@ -181,50 +276,34 @@ void *masterThread(void *arg0)
     send_spi_command(0b1111111100000000, masterSpi, transaction);
     send_spi_command(0b1111111100000000, masterSpi, transaction);
 
-    /* Wait 5s for the chip to stabilize*/
-    sleep(5);
+    /* Wait 3s for the chip to stabilize*/
+    sleep(3);
 
     /*Start sampling*/
-    int f_sample = 300000;
-    int delay = (int)1000000*(1/(float)f_sample);
-
-    int i = 0;
-    while(1){
-        double min = voltage_readings[0];
-        double max = voltage_readings[0];
-        double sum = 0.0;
-        double avg = 0.0;
-        double v = 0;
-        for(i = 0; i < n_samples; i++){
-            //voltage_readings[i] = 0.195*convert_channel(0, masterSpi, transaction);
-            v = 0.195*convert_channel(0, masterSpi, transaction);
+    int f_sample = 500;
+    int delay = (int)1000000*(1/(double)f_sample);
+    #ifdef RECORD_WAVEFORM
+        int i = 0;
+        for(i = 0; i< n_samples; i++){
+            voltage_readings[i] = 0.195*convert_channel(0, masterSpi, transaction);
+            //PIN_setOutputValue(ledPinHandle, Board_PIN_LED0, 0);
+            //PIN_setOutputValue(ledPinHandle, Board_PIN_LED1, 1);
             usleep(delay);
         }
-        /*
-        for (i = 0; i < n_samples; i++) {
-            if (voltage_readings[i] < min) {
-                min = voltage_readings[i];  // Update min if current value is smaller
+    #else
+        double v = 0;
+        while(1){
+            v = 0.195*convert_channel(0, masterSpi, transaction);
+            PIN_setOutputValue(ledPinHandle, Board_PIN_LED0, 0);
+            PIN_setOutputValue(ledPinHandle, Board_PIN_LED1, 1);
+            if(v>1500){
+                PIN_setOutputValue(ledPinHandle, Board_PIN_LED0, 1);
+                PIN_setOutputValue(ledPinHandle, Board_PIN_LED1, 0);
+                rfStimulation(5);
             }
-            if (voltage_readings[i] > max) {
-                max = voltage_readings[i];  // Update max if current value is larger
-            }
-            sum += voltage_readings[i];  // Add current value to sum
+            usleep(delay);
         }
-
-
-        avg = sum / n_samples;
-
-        char buffer[50];
-        sprintf(buffer, "Min value: %.2f uV \n", min);
-        printf("%s", buffer);
-        sprintf(buffer, "Avg value: %.2f uV \n", avg);
-        printf("%s", buffer);
-        sprintf(buffer, "Max value: %.2f uV \n", max);
-        printf("%s", buffer);
-        printf("\n");
-        */
-    }
-
+    #endif
 
     SPI_close(masterSpi);
     printf("Data acquisition complete \n");
@@ -234,6 +313,11 @@ void *masterThread(void *arg0)
 
 void *mainThread(void *arg0)
 {
+    ledPinHandle = PIN_open(&ledPinState, ledPinTable);
+    if(!ledPinHandle) {
+        /* Error initializing board LED pins */
+        while(1);
+    }
     pthread_t           thread0;
     pthread_attr_t      attrs;
     struct sched_param  priParam;
@@ -241,9 +325,23 @@ void *mainThread(void *arg0)
     int                 detachState;
 
     GPIO_init();
-    /*Set CSn to high */
-    GPIO_write(IOID_11, 1);
     SPI_init();
+
+    PIN_setOutputValue(ledPinHandle, Board_PIN_LED0, 0);
+    PIN_setOutputValue(ledPinHandle, Board_PIN_LED1, 1);
+    PIN_setOutputValue(ledPinHandle, Board_PIN_PA, 0);
+
+    RF_Params rfParams;
+    RF_Params_init(&rfParams);
+
+    RF_cmdPropTx.pktLen = PAYLOAD_LENGTH;
+    RF_cmdPropTx.pPkt = packet;
+    RF_cmdPropTx.startTrigger.triggerType = TRIG_NOW;
+
+    rfHandle = RF_open(&rfObject, &RF_prop, (RF_RadioSetup*)&RF_cmdPropRadioDivSetup, &rfParams);
+
+    /* Set the frequency */
+    RF_postCmd(rfHandle, (RF_Op*)&RF_cmdFs, RF_PriorityNormal, NULL, 0);
 
     printf("Initializing Intan RHD2132 \n");
 
