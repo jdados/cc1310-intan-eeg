@@ -1,5 +1,5 @@
 # Basic information
-This repository contains the CC1310 program for the Tx Coil project. It's capable of recording EEG waveforms or transmitting the RF signal under OOK modulation (default). The code is based on a LaunchPad example project rfPacketTx.
+This repository contains the CC1310 program for the Tx Coil project. It's capable of recording EEG waveforms or transmitting the RF signal under OOK modulation (default). The code is based on a LaunchPad example project spimaster.
 # Programming the device
 The CC1310 LaunchPad can be used to program the microcontroller on a custom PCB. 
 1. Disconnect the XDS debugger circuit and the uC circuit on the LaunchPad from each other by removing on-board header jumpers for the JTAG TCK, TMS, and RST lines.
